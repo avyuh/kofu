@@ -1,7 +1,7 @@
 # Kofu
 
-[![PyPI version](https://img.shields.io/pypi/v/kofu.svg)](https://pypi.org/project/kofu)
-[![Python Versions](https://img.shields.io/pypi/pyversions/kofu.svg)](https://pypi.org/project/kofu/)
+[![PyPI version](https://badge.fury.io/py/kofu.svg)](https://badge.fury.io/py/kofu)
+[![Python Versions](https://img.shields.io/pypi/pyversions/kofu)](https://img.shields.io/pypi/pyversions/kofu)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Kofu** (Japanese for "Miner") is a Python framework for managing and executing concurrent tasks with built-in persistence. It's designed for single-computer environments, particularly Colab notebooks, focusing on I/O-heavy operations such as web scraping and LLM-based workflows.
