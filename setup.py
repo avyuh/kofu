@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='kofu',  # Project name
-    version='0.1.0',
+    version='0.2.1',
     description='An execution framework for i/o heavy task with memory persistence and concurrency',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
