@@ -1,0 +1,76 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# Additionally, it will only deploy to PyPI when a tag is pushed that follows the versioning pattern.
+
+name: Python package
+
+on:
+  push:
+    branches: [ "main" ]  # Trigger testing on push to main
+    tags: 
+      - 'v*.*.*'   # Trigger publishing only when a version tag is pushed
+  pull_request:
+    branches: [ "main" ]  # Trigger testing on pull requests to main
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pytest
+        pip install -e .  # Install kofu package locally in editable mode
+
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Test with pytest
+      run: |
+        pytest
+
+  publish:
+    # This job will only run when a version tag is pushed.
+    runs-on: ubuntu-latest
+    needs: build   # Ensure this runs only if the build (and tests) pass
+    if: startsWith(github.ref, 'refs/tags/v')  # Only run when a tag is pushed
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.x  # Use the latest Python version for publishing
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.x"
+
+    - name: Install build tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine  # These are required to build and publish to PyPI
+
+    - name: Build the package
+      run: |
+        python -m build  # Builds both source distribution and wheel (sdist and bdist_wheel)
+
+    - name: Publish to PyPI
+      env:
+        TWINE_USERNAME: "__token__"  # Username for PyPI token
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}  # PyPI API token stored in GitHub secrets
+      run: |
+        python -m twine upload dist/*  # Upload the package to PyPI
