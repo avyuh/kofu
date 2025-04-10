@@ -4,8 +4,17 @@ from tqdm import tqdm  # Import tqdm for progress bar
 from kofu.memory.sqlite_memory import SQLiteMemory  # Import SQLiteMemory
 from kofu.tasks import SimpleFn
 
+
 class LocalThreadedExecutor:
-    def __init__(self, tasks: List, memory=None, path: Optional[str] = None, max_concurrency: int = 4, stop_all_when: Optional[Callable] = None, retry: int = 1):
+    def __init__(
+        self,
+        tasks: List,
+        memory=None,
+        path: Optional[str] = None,
+        max_concurrency: int = 4,
+        stop_all_when: Optional[Callable] = None,
+        retry: int = 1,
+    ):
         """
         Initialize the LocalThreadedExecutor.
 
@@ -52,7 +61,9 @@ class LocalThreadedExecutor:
 
         # Retrieve pending tasks from memory
         pending_task_ids = set(self.memory.get_pending_tasks())
-        tasks_to_run = [task for task in self.tasks if task.get_id() in pending_task_ids]
+        tasks_to_run = [
+            task for task in self.tasks if task.get_id() in pending_task_ids
+        ]
 
         if not tasks_to_run:
             print("All tasks are already completed.")
@@ -64,7 +75,12 @@ class LocalThreadedExecutor:
         failed_tasks = len(self.memory.get_failed_tasks())
 
         # Initialize progress bar
-        with tqdm(total=total_tasks, desc="Task Progress", unit="task", initial=completed_tasks + failed_tasks) as pbar:
+        with tqdm(
+            total=total_tasks,
+            desc="Task Progress",
+            unit="task",
+            initial=completed_tasks + failed_tasks,
+        ) as pbar:
             # Thread pool execution
             with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
                 future_to_task = {}
@@ -82,14 +98,20 @@ class LocalThreadedExecutor:
                 for future in as_completed(future_to_task):
                     task = future_to_task[future]
                     try:
-                        result = future.result()  # This will raise an exception if the task failed
-                        self.memory.update_task_statuses([(task.get_id(), 'completed', result, None)])
+                        result = (
+                            future.result()
+                        )  # This will raise an exception if the task failed
+                        self.memory.update_task_statuses(
+                            [(task.get_id(), "completed", result, None)]
+                        )
                         completed_tasks += 1
                     except Exception as e:
                         exception_type = type(e).__name__
                         exception_message = str(e)
                         error_info = f"{exception_type}: {exception_message}"
-                        self.memory.update_task_statuses([(task.get_id(), 'failed', None, error_info)])
+                        self.memory.update_task_statuses(
+                            [(task.get_id(), "failed", None, error_info)]
+                        )
                         failed_tasks += 1
 
                     # Update progress bar
@@ -111,12 +133,14 @@ class LocalThreadedExecutor:
         """
         if self._stopped:
             raise RuntimeError("Execution was stopped by an external condition.")
-        
+
         try:
             return task()  # Try to execute the task
         except Exception as e:
             if retries_left >= 1:
-                print(f"Retrying task {task.get_id()}... Attempts left: {retries_left-1}")
+                print(
+                    f"Retrying task {task.get_id()}... Attempts left: {retries_left-1}"
+                )
                 return self._execute_task(task, retries_left - 1)
             else:
                 raise e  # Raise the error if no retries are left
@@ -139,14 +163,12 @@ class LocalThreadedExecutor:
                     task_data = {
                         "fn_name": task.fn.__name__,
                         "args": task.args,
-                        "kwargs": task.kwargs
+                        "kwargs": task.kwargs,
                     }
                 else:
                     # Generic task data (optional, based on your task implementation)
-                    task_data = {
-                        "task_type": type(task).__name__
-                    }
-                
+                    task_data = {"task_type": type(task).__name__}
+
                 # Store task definition with ID and data
                 task_definitions.append((task_id, task_data))
 

@@ -1,3 +1,48 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kofu"
+version = "0.2.2"
+description = "An execution framework for i/o heavy task with memory persistence and concurrency"
+readme = "README.md"
+authors = [
+    {name = "avyuh", email = "contact@jhaabhi.com"}
+]
+requires-python = ">=3.9"
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "tqdm",
+]
+
+[project.urls]
+Homepage = "https://github.com/avyuh/kofu"
+Issues = "https://github.com/avyuh/kofu/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "flake8>=6.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kofu"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/kofu",
+    "tests",
+    "README.md",
+]
+
+[tool.uv]
+# UV specific configuration
+dev-dependencies = [
+    "pytest>=8.3.5",
+]

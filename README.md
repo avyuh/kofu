@@ -38,19 +38,19 @@
 
 ## Installation
 
-Install from PyPI (recommended):
+Install from uv (recommended):
 
 ```bash
-pip install kofu
+uv add kofu
 ```
 
 For the latest development version, install from GitHub:
 
 ```bash
-pip install git+https://github.com/avyuh/kofu.git
+uv pip install git+https://github.com/avyuh/kofu.git
 ```
 
-Kofu supports Python 3.7+.
+Kofu supports Python 3.9+.
 
 ## Quick Start
 
@@ -373,8 +373,8 @@ Please make sure to update tests as appropriate and adhere to the [Code of Condu
 Run the test suite using pytest:
 
 ```bash
-pip install pytest
-pytest
+uv add --dev pytest
+uv run pytest
 ```
 
 ## TODO

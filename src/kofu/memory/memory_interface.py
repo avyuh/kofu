@@ -1,14 +1,17 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, Tuple
 
+
 class Memory(ABC):
     @abstractmethod
     def store_tasks(self, tasks: List[Tuple[str, dict]]):
         """Store multiple tasks in memory. Each task is a tuple (task_id, task_data)."""
         pass
-    
+
     @abstractmethod
-    def update_task_statuses(self, statuses: List[Tuple[str, str, Optional[dict], Optional[str]]]):
+    def update_task_statuses(
+        self, statuses: List[Tuple[str, str, Optional[dict], Optional[str]]]
+    ):
         """
         Update the status of multiple tasks. Each status update is a tuple of:
         (task_id, status, result, error).
@@ -24,7 +27,7 @@ class Memory(ABC):
     def get_pending_tasks(self) -> List[str]:
         """Retrieve all tasks that are pending."""
         pass
-    
+
     @abstractmethod
     def get_completed_tasks(self) -> List[str]:
         """Retrieve all tasks that have been completed successfully."""

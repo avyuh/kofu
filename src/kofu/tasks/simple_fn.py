@@ -1,5 +1,6 @@
 from typing import Callable, Any, Tuple
 
+
 class SimpleFn:
     def __init__(self, task_id: str, fn: Callable, args: Tuple = (), kwargs: dict = {}):
         """

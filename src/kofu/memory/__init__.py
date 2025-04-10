@@ -3,4 +3,4 @@
 from .sqlite_memory import SQLiteMemory
 from .memory_interface import Memory
 
-__all__ = ['SQLiteMemory', 'Memory']
+__all__ = ["SQLiteMemory", "Memory"]

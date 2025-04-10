@@ -1,5 +1,8 @@
 import pytest
-from kofu import LocalThreadedExecutor  # Assuming this is the file with the executor implementation
+from kofu import (
+    LocalThreadedExecutor,
+)  # Assuming this is the file with the executor implementation
+
 
 # Task definition for testing
 class ExampleTaskWithException:
@@ -16,33 +19,43 @@ class ExampleTaskWithException:
             raise Exception(f"Task {self.task_id} failed")
         return f"Processed {self.url}"
 
+
 # Fixture to provide a fresh SQLiteMemory for each test
 @pytest.fixture
 def sqlite_memory():
     from kofu.memory import SQLiteMemory
+
     return SQLiteMemory(":memory:")  # Use in-memory SQLite for testing
+
 
 # Test task execution with exceptions (error handling)
 def test_task_execution_with_exceptions(sqlite_memory):
     tasks = [
         ExampleTaskWithException("task_1", "http://example.com", should_fail=True),
-        ExampleTaskWithException("task_2", "http://example.org", should_fail=False)
+        ExampleTaskWithException("task_2", "http://example.org", should_fail=False),
     ]
-    sqlite_memory.store_tasks([
-        ("task_1", {"url": "http://example.com"}),
-        ("task_2", {"url": "http://example.org"})
-    ])
+    sqlite_memory.store_tasks(
+        [
+            ("task_1", {"url": "http://example.com"}),
+            ("task_2", {"url": "http://example.org"}),
+        ]
+    )
 
-    executor = LocalThreadedExecutor(tasks=tasks, memory=sqlite_memory, max_concurrency=2)
+    executor = LocalThreadedExecutor(
+        tasks=tasks, memory=sqlite_memory, max_concurrency=2
+    )
 
     # Run the executor
     executor.run()
 
     # Check task_1 failed and task_2 succeeded
     assert sqlite_memory.get_task_status("task_1") == "failed"
-    assert sqlite_memory.get_failed_tasks() == [("task_1", "Exception: Task task_1 failed")]
+    assert sqlite_memory.get_failed_tasks() == [
+        ("task_1", "Exception: Task task_1 failed")
+    ]
     assert sqlite_memory.get_task_status("task_2") == "completed"
     assert sqlite_memory.get_task_result("task_2") == "Processed http://example.org"
+
 
 # Test status summary after task execution
 def test_status_summary_after_execution(sqlite_memory, capsys):
@@ -51,13 +64,17 @@ def test_status_summary_after_execution(sqlite_memory, capsys):
         ExampleTaskWithException("task_2", "http://example.org", should_fail=True),
         ExampleTaskWithException("task_3", "http://example.net", should_fail=False),
     ]
-    sqlite_memory.store_tasks([
-        ("task_1", {"url": "http://example.com"}),
-        ("task_2", {"url": "http://example.org"}),
-        ("task_3", {"url": "http://example.net"})
-    ])
+    sqlite_memory.store_tasks(
+        [
+            ("task_1", {"url": "http://example.com"}),
+            ("task_2", {"url": "http://example.org"}),
+            ("task_3", {"url": "http://example.net"}),
+        ]
+    )
 
-    executor = LocalThreadedExecutor(tasks=tasks, memory=sqlite_memory, max_concurrency=2)
+    executor = LocalThreadedExecutor(
+        tasks=tasks, memory=sqlite_memory, max_concurrency=2
+    )
 
     # Run the executor
     executor.run()
@@ -69,6 +86,7 @@ def test_status_summary_after_execution(sqlite_memory, capsys):
     assert "Pending tasks: 0" in captured.out
     assert "Completed tasks: 2" in captured.out
     assert "Failed tasks: 1" in captured.out
+
 
 # Test failed tasks are retried (if applicable)
 def test_failed_tasks_are_retried(sqlite_memory):
@@ -86,17 +104,22 @@ def test_failed_tasks_are_retried(sqlite_memory):
                 raise Exception(f"Task {self.task_id} failed on first attempt")
             return f"Processed {self.url} on retry"
 
-    tasks = [
-        ExampleTaskWithRetry("task_1", "http://example.com", should_fail=True)
-    ]
+    tasks = [ExampleTaskWithRetry("task_1", "http://example.com", should_fail=True)]
     sqlite_memory.store_tasks([("task_1", {"url": "http://example.com"})])
 
-    executor = LocalThreadedExecutor(tasks=tasks, memory=sqlite_memory, max_concurrency=1)
+    executor = LocalThreadedExecutor(
+        tasks=tasks, memory=sqlite_memory, max_concurrency=1
+    )
 
     # Run the executor
     executor.run()
 
     # Ensure the task was retried and succeeded on the second attempt
-    assert execution_count["task_1"] == 2  # Task should be executed twice (once failed, once succeeded)
+    assert (
+        execution_count["task_1"] == 2
+    )  # Task should be executed twice (once failed, once succeeded)
     assert sqlite_memory.get_task_status("task_1") == "completed"
-    assert sqlite_memory.get_task_result("task_1") == "Processed http://example.com on retry"
+    assert (
+        sqlite_memory.get_task_result("task_1")
+        == "Processed http://example.com on retry"
+    )
