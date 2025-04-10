@@ -1,1 +1,1 @@
-from .simple_fn import SimpleFn
+from .simple_fn import SimpleFn as SimpleFn

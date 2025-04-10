@@ -87,7 +87,7 @@ class LocalThreadedExecutor:
                 # Submit tasks to the executor one by one, checking stop condition before submitting
                 for task in tasks_to_run:
                     if self._stopped or (self.stop_all_when and self.stop_all_when()):
-                        print(f"Stop condition met. Halting task submission.")
+                        print("Stop condition met. Halting task submission.")
                         self._stopped = True
                         break
 
@@ -119,7 +119,7 @@ class LocalThreadedExecutor:
 
                     # Check the stop condition after each task is processed
                     if self.stop_all_when and self.stop_all_when():
-                        print(f"Emergency stop condition met. Halting execution.")
+                        print("Emergency stop condition met. Halting execution.")
                         self._stopped = True
                         break
 

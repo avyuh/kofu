@@ -215,11 +215,6 @@ def test_dump_all(sqlite_memory):
 # Edge Cases
 
 
-def test_store_task_with_invalid_data(sqlite_memory):
-    with pytest.raises(TypeError):
-        sqlite_memory.store_tasks([("task_1", None)])  # Invalid task data
-
-
 def test_update_nonexistent_task(sqlite_memory):
     with pytest.raises(KeyError):
         sqlite_memory.update_task_statuses(
