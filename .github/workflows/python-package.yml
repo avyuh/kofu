@@ -13,7 +13,6 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -24,26 +23,33 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Install UV
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install flake8 pytest
-        pip install -e .  # Install kofu package locally in editable mode
+        uv venv
+        uv add --dev pytest ruff black
+        uv sync  # Sync dependencies with current environment
 
-    - name: Lint with flake8
+    - name: Lint with Ruff
       run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        # Run Ruff on all files
+        uv run ruff check .
+        
+    - name: Check formatting with Black
+      run: |
+        # Check if files would be reformatted by Black
+        uv run black --check .
 
     - name: Test with pytest
       run: |
-        pytest
+        uv run pytest
 
   publish:
     # This job will only run when a version tag is pushed.
@@ -54,23 +60,26 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python 3.x  # Use the latest Python version for publishing
-      uses: actions/setup-python@v3
+    - name: Set up Python 3.x
+      uses: actions/setup-python@v4
       with:
-        python-version: "3.x"
+        python-version: "3.11"
 
-    - name: Install build tools
+    - name: Install UV
       run: |
-        python -m pip install --upgrade pip
-        pip install build twine  # These are required to build and publish to PyPI
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Install dependencies
+      run: |
+        uv venv
+        uv sync  # Sync dependencies with current environment
 
     - name: Build the package
       run: |
-        python -m build  # Builds both source distribution and wheel (sdist and bdist_wheel)
+        uv build  # Build source and wheel distribution
 
     - name: Publish to PyPI
       env:
-        TWINE_USERNAME: "__token__"  # Username for PyPI token
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}  # PyPI API token stored in GitHub secrets
+        PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
       run: |
-        python -m twine upload dist/*  # Upload the package to PyPI
+        uv publish --token $PYPI_API_TOKEN  # Upload to PyPI using UV

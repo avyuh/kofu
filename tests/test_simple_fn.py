@@ -2,10 +2,12 @@ import pytest
 from kofu.tasks.simple_fn import SimpleFn
 from kofu import LocalThreadedExecutor, SQLiteMemory
 
+
 @pytest.fixture
 def sqlite_memory():
     """Fixture to provide a fresh SQLiteMemory instance for each test."""
     return SQLiteMemory(":memory:")  # In-memory SQLite for testing
+
 
 # Test 1: Basic execution of SimpleFn
 def test_simple_fn_execution(sqlite_memory):
@@ -21,6 +23,7 @@ def test_simple_fn_execution(sqlite_memory):
     result = task()
     assert result == 8
 
+
 # Test 2: Using SimpleFn in LocalThreadedExecutor
 def test_simple_fn_with_executor(sqlite_memory):
     def multiply_fn(a, b):
@@ -32,7 +35,9 @@ def test_simple_fn_with_executor(sqlite_memory):
     ]
 
     # Run the tasks using LocalThreadedExecutor
-    executor = LocalThreadedExecutor(tasks=tasks, memory=sqlite_memory, max_concurrency=2)
+    executor = LocalThreadedExecutor(
+        tasks=tasks, memory=sqlite_memory, max_concurrency=2
+    )
     executor.run()
 
     print("@@", sqlite_memory.dump_all())
@@ -41,17 +46,21 @@ def test_simple_fn_with_executor(sqlite_memory):
         assert sqlite_memory.get_task_status(f"task_{i}") == "completed"
         assert sqlite_memory.get_task_result(f"task_{i}") == i * 2
 
+
 # Test 3: Handling keyword arguments in SimpleFn
 def test_simple_fn_with_kwargs(sqlite_memory):
     def concat_fn(a, b, sep=" "):
         return f"{a}{sep}{b}"
 
     # Create SimpleFn task with keyword argument
-    task = SimpleFn(task_id="task_1", fn=concat_fn, args=("Hello", "World"), kwargs={"sep": ", "})
+    task = SimpleFn(
+        task_id="task_1", fn=concat_fn, args=("Hello", "World"), kwargs={"sep": ", "}
+    )
 
     # Ensure the task executes correctly
     result = task()
     assert result == "Hello, World"
+
 
 # Test 4: Using SimpleFn for tasks that raise exceptions
 def test_simple_fn_with_error(sqlite_memory):
@@ -62,7 +71,9 @@ def test_simple_fn_with_error(sqlite_memory):
     task = SimpleFn(task_id="task_1", fn=faulty_fn)
 
     # Run the task with LocalThreadedExecutor
-    executor = LocalThreadedExecutor(tasks=[task], memory=sqlite_memory, max_concurrency=1)
+    executor = LocalThreadedExecutor(
+        tasks=[task], memory=sqlite_memory, max_concurrency=1
+    )
     executor.run()
 
     # Ensure the task failed
