@@ -1,25 +1,29 @@
-from typing import Callable, Any, Tuple
+from dataclasses import dataclass
+from typing import Callable, Any, Tuple, Dict
 
 
+@dataclass
 class SimpleFn:
-    def __init__(self, task_id: str, fn: Callable, args: Tuple = (), kwargs: dict = {}):
-        """
-        Initialize the SimpleFn task.
+    """A simple function-based task implementation.
 
-        :param task_id: Unique ID for the task
-        :param fn: The function to be executed
-        :param args: Positional arguments to pass to the function
-        :param kwargs: Keyword arguments to pass to the function
-        """
-        self.task_id = task_id
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
+    This class wraps a Python function with its arguments to create a task
+    that can be executed by Kofu's execution framework.
+    """
 
-    def get_id(self) -> str:
-        """
-        Return the unique task ID.
-        """
+    task_id: str
+    fn: Callable
+    args: Tuple = ()
+    kwargs: Dict = None
+
+    def __post_init__(self):
+        """Initialize after dataclass construction."""
+        # Ensure kwargs is never None
+        if self.kwargs is None:
+            self.kwargs = {}
+
+    @property
+    def id(self) -> str:
+        """Return the unique task ID."""
         return self.task_id
 
     def __call__(self) -> Any:
