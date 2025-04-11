@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)  # Immutable
-class Task:
+class TaskDefinition:
     """Immutable task definition (creation only).
 
     Contains the essential identification and data for a task.
@@ -31,7 +31,7 @@ class TaskState:
     Result dictionaries must be JSON-serializable for all implementations.
     """
 
-    task: Task  # Immutable definition
+    task: TaskDefinition  # Immutable definition
     status: TaskStatus
     result: Optional[Dict[str, Any]] = None  # Document as JSON-serializable
     error: Optional[str] = None

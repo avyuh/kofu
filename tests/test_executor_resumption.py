@@ -1,6 +1,6 @@
 import pytest
 from kofu import LocalThreadedExecutor
-from kofu.store import SingleSQLiteTaskStore, Task, TaskState, TaskStatus
+from kofu.store import SingleSQLiteTaskStore, TaskDefinition, TaskState, TaskStatus
 import sqlite3
 
 
@@ -9,7 +9,8 @@ class ExampleTask:
         self.task_id = task_id
         self.url = url
 
-    def get_id(self):
+    @property
+    def id(self):
         return self.task_id
 
     def __call__(self):
@@ -29,18 +30,18 @@ def test_resumption_after_some_tasks_completed(store):
         ExampleTask("task_2", "http://example.org"),
         ExampleTask("task_3", "http://example.net"),
     ]
-    store.put_many([Task(id=t.get_id(), data={"url": t.url}) for t in tasks])
+    store.put_many([TaskDefinition(id=t.id, data={"url": t.url}) for t in tasks])
 
     # Mark task_1 and task_2 as completed
     store.set_many(
         [
             TaskState(
-                task=Task(id="task_1", data={"url": "http://example.com"}),
+                task=TaskDefinition(id="task_1", data={"url": "http://example.com"}),
                 status=TaskStatus.COMPLETED,
                 result={"html": "<html>Processed</html>"},
             ),
             TaskState(
-                task=Task(id="task_2", data={"url": "http://example.org"}),
+                task=TaskDefinition(id="task_2", data={"url": "http://example.org"}),
                 status=TaskStatus.COMPLETED,
                 result={"html": "<html>Processed</html>"},
             ),
@@ -62,12 +63,12 @@ def test_resumption_after_incomplete_execution(store):
         ExampleTask("task_2", "http://example.org"),
         ExampleTask("task_3", "http://example.net"),
     ]
-    store.put_many([Task(id=t.get_id(), data={"url": t.url}) for t in tasks])
+    store.put_many([TaskDefinition(id=t.id, data={"url": t.url}) for t in tasks])
 
     store.set_many(
         [
             TaskState(
-                task=Task(id="task_1", data={"url": "http://example.com"}),
+                task=TaskDefinition(id="task_1", data={"url": "http://example.com"}),
                 status=TaskStatus.COMPLETED,
                 result={"html": "<html>Processed</html>"},
             )
@@ -87,7 +88,7 @@ def test_memory_persistence_for_task_statuses(store):
         ExampleTask("task_1", "http://example.com"),
         ExampleTask("task_2", "http://example.org"),
     ]
-    store.put_many([Task(id=t.get_id(), data={"url": t.url}) for t in tasks])
+    store.put_many([TaskDefinition(id=t.id, data={"url": t.url}) for t in tasks])
 
     executor = LocalThreadedExecutor(tasks=tasks, store=store, max_concurrency=2)
     executor.run()
@@ -99,7 +100,7 @@ def test_memory_persistence_for_task_statuses(store):
     store.set_many(
         [
             TaskState(
-                task=Task(id="task_1", data={"url": "http://example.com"}),
+                task=TaskDefinition(id="task_1", data={"url": "http://example.com"}),
                 status=TaskStatus.FAILED,
                 error="TimeoutError",
             )

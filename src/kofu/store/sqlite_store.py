@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from typing import Dict, Iterator, Optional, Any, Union
 
 from .task_store import TaskStore
-from .task_state import Task, TaskState, TaskStatus
+from .task_state import TaskDefinition, TaskState, TaskStatus
 
 from packaging.version import Version, InvalidVersion
 
@@ -433,7 +433,7 @@ class SingleSQLiteTaskStore(TaskStore):
             for row in cursor:
                 task_id, task_data_blob, is_completed, result_blob, error = row
                 task_data = self.serializer.deserialize(task_data_blob)
-                task = Task(id=task_id, data=task_data)
+                task = TaskDefinition(id=task_id, data=task_data)
                 if is_completed:
                     status = TaskStatus.COMPLETED
                     result = self.serializer.deserialize(result_blob)
@@ -449,7 +449,7 @@ class SingleSQLiteTaskStore(TaskStore):
                 )
         return results
 
-    def put_many(self, tasks: list[Task]) -> None:
+    def put_many(self, tasks: list[TaskDefinition]) -> None:
         """Create multiple tasks with PENDING status.
 
         Args:
@@ -636,7 +636,7 @@ class SingleSQLiteTaskStore(TaskStore):
 
                 # Deserialize task data
                 task_data = self.serializer.deserialize(task_data_blob)
-                task = Task(id=task_id, data=task_data)
+                task = TaskDefinition(id=task_id, data=task_data)
 
                 # Determine status and results
                 if is_completed:
@@ -701,7 +701,7 @@ class SingleSQLiteTaskStore(TaskStore):
                 task_data = self.serializer.deserialize(task_data_blob)
                 result = self.serializer.deserialize(result_blob)
 
-                task = Task(id=task_id, data=task_data)
+                task = TaskDefinition(id=task_id, data=task_data)
                 yield TaskState(
                     task=task, status=TaskStatus.COMPLETED, result=result, error=None
                 )
@@ -719,7 +719,7 @@ class SingleSQLiteTaskStore(TaskStore):
                 task_id, task_data_blob, error = row
                 task_data = self.serializer.deserialize(task_data_blob)
 
-                task = Task(id=task_id, data=task_data)
+                task = TaskDefinition(id=task_id, data=task_data)
                 yield TaskState(
                     task=task, status=TaskStatus.FAILED, result=None, error=error
                 )
@@ -738,7 +738,7 @@ class SingleSQLiteTaskStore(TaskStore):
                 task_id, task_data_blob = row
                 task_data = self.serializer.deserialize(task_data_blob)
 
-                task = Task(id=task_id, data=task_data)
+                task = TaskDefinition(id=task_id, data=task_data)
                 yield TaskState(
                     task=task, status=TaskStatus.PENDING, result=None, error=None
                 )

@@ -1,6 +1,6 @@
 import pytest
 from kofu import LocalThreadedExecutor
-from kofu.store import SingleSQLiteTaskStore, Task, TaskState, TaskStatus
+from kofu.store import SingleSQLiteTaskStore, TaskDefinition, TaskState, TaskStatus
 import sqlite3
 
 
@@ -9,7 +9,8 @@ class ExampleTask:
         self.task_id = task_id
         self.url = url
 
-    def get_id(self):
+    @property
+    def id(self):
         return self.task_id
 
     def __call__(self):
@@ -37,7 +38,7 @@ def get_result(store, task_id):
 
 def test_single_task_execution(store):
     task = ExampleTask("task_1", "http://example.com")
-    task_obj = Task(id="task_1", data={"url": "http://example.com"})
+    task_obj = TaskDefinition(id="task_1", data={"url": "http://example.com"})
     store.put_many([task_obj])
 
     executor = LocalThreadedExecutor(
@@ -59,8 +60,8 @@ def test_multiple_task_execution(store):
 
     store.put_many(
         [
-            Task(id="task_1", data={"url": "http://example.com"}),
-            Task(id="task_2", data={"url": "http://example.org"}),
+            TaskDefinition(id="task_1", data={"url": "http://example.com"}),
+            TaskDefinition(id="task_2", data={"url": "http://example.org"}),
         ]
     )
 
@@ -83,14 +84,14 @@ def test_skip_completed_tasks(store):
 
     store.put_many(
         [
-            Task(id="task_1", data={"url": "http://example.com"}),
-            Task(id="task_2", data={"url": "http://example.org"}),
+            TaskDefinition(id="task_1", data={"url": "http://example.com"}),
+            TaskDefinition(id="task_2", data={"url": "http://example.org"}),
         ]
     )
     store.set_many(
         [
             TaskState(
-                task=Task(id="task_1", data={"url": "http://example.com"}),
+                task=TaskDefinition(id="task_1", data={"url": "http://example.com"}),
                 status=TaskStatus.COMPLETED,
                 result={"html": "<html>Processed</html>"},
             )
@@ -110,7 +111,7 @@ def test_skip_completed_tasks(store):
 
 def test_put_and_get_many_above_sqlite_limit(store):
     num_tasks = 1050  # just above the 999 SQLite param limit
-    tasks = [Task(id=f"task-{i}", data={"x": i}) for i in range(num_tasks)]
+    tasks = [TaskDefinition(id=f"task-{i}", data={"x": i}) for i in range(num_tasks)]
 
     # Should not raise or truncate
     store.put_many(tasks)
@@ -123,7 +124,7 @@ def test_put_and_get_many_above_sqlite_limit(store):
 
 def test_set_many_completed_chunked_above_sqlite_limit(store):
     num_tasks = 1050
-    tasks = [Task(id=f"task-{i}", data={"x": i}) for i in range(num_tasks)]
+    tasks = [TaskDefinition(id=f"task-{i}", data={"x": i}) for i in range(num_tasks)]
     store.put_many(tasks)
 
     states = [
@@ -139,7 +140,7 @@ def test_set_many_completed_chunked_above_sqlite_limit(store):
 
 def test_delete_many_above_sqlite_limit(store):
     num_tasks = 1050
-    tasks = [Task(id=f"task-{i}", data={"x": i}) for i in range(num_tasks)]
+    tasks = [TaskDefinition(id=f"task-{i}", data={"x": i}) for i in range(num_tasks)]
     store.put_many(tasks)
 
     to_delete = [t.id for t in tasks[:500]]

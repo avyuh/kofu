@@ -12,7 +12,7 @@ from collections import defaultdict
 from kofu import LocalThreadedExecutor
 from kofu.store import (
     SingleSQLiteTaskStore,
-    Task,
+    TaskDefinition,
     TaskState,
     TaskStatus,
     get_status_summary,

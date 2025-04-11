@@ -2,12 +2,27 @@ import logging
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, Optional, Set, TypedDict, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Optional,
+    Set,
+    TypedDict,
+    cast,
+)
 
 from tqdm import tqdm
 
-from .store import TaskStore, Task, TaskState, TaskStatus, SingleSQLiteTaskStore
+from .store import (
+    TaskStore,
+    TaskDefinition,
+    TaskState,
+    TaskStatus,
+    SingleSQLiteTaskStore,
+)
 from .tasks import SimpleFn
+from .tasks import Task
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -30,7 +45,7 @@ class LocalThreadedExecutor:
 
     def __init__(
         self,
-        tasks: list,
+        tasks: list[Task],
         store: Optional[TaskStore] = None,
         path: Optional[str] = None,
         max_concurrency: int = 4,
@@ -41,7 +56,7 @@ class LocalThreadedExecutor:
         """Initialize the executor.
 
         Args:
-            tasks: List of task instances that can be executed
+            tasks: List of task instances that conform to the Task protocol
             store: TaskStore for state persistence (default None, will create SingleSQLiteTaskStore)
             path: Path for store if none provided (required if store is None)
             max_concurrency: Maximum number of threads to run concurrently
@@ -51,10 +66,18 @@ class LocalThreadedExecutor:
 
         Raises:
             ValueError: If neither store nor path is provided
+            TypeError: If any task does not conform to the Task protocol
         """
         logger.debug(
             "LocalThreadedExecutor.__init__: Starting initialization."
         )  # Added log
+
+        # Validate all tasks conform to the Task protocol
+        for i, task in enumerate(tasks):
+            if not isinstance(task, Task):
+                raise TypeError(
+                    f"Task at index {i} does not conform to the Task protocol"
+                )
 
         self.tasks = tasks
         self.path = path
@@ -66,7 +89,7 @@ class LocalThreadedExecutor:
 
         # Task lookup for efficient access
         logger.debug("LocalThreadedExecutor.__init__: Creating task map.")  # Added log
-        self._task_map = {task.get_id(): task for task in tasks}
+        self._task_map = {task.id: task for task in tasks}
         logger.debug(
             f"LocalThreadedExecutor.__init__: Task map created with {len(self._task_map)} entries."
         )  # Added log
@@ -194,7 +217,7 @@ class LocalThreadedExecutor:
                 # Process results as they complete
                 for future in as_completed(future_to_task):
                     task = future_to_task[future]
-                    task_id = task.get_id()
+                    task_id = task.id
 
                     try:
                         # Get task result
@@ -204,7 +227,9 @@ class LocalThreadedExecutor:
                         result = self._validate_result(result)
 
                         # Create task object matching our data model
-                        task_obj = Task(id=task_id, data=self._get_task_data(task))
+                        task_obj = TaskDefinition(
+                            id=task_id, data=self._get_task_data(task)
+                        )
 
                         # Add to completed batch
                         completed_states.append(
@@ -220,7 +245,9 @@ class LocalThreadedExecutor:
                         logger.warning(f"Task {task_id} failed: {str(e)}")
 
                         # Create task object
-                        task_obj = Task(id=task_id, data=self._get_task_data(task))
+                        task_obj = TaskDefinition(
+                            id=task_id, data=self._get_task_data(task)
+                        )
 
                         # Format error message
                         error_message = f"{type(e).__name__}: {str(e)}"
@@ -333,7 +360,7 @@ class LocalThreadedExecutor:
                 wait_time = delay + jitter
 
                 logger.info(
-                    f"Retrying task {task.get_id()} in {wait_time:.2f}s... "
+                    f"Retrying task {task.id} in {wait_time:.2f}s... "
                     f"Attempts left: {retries_left-1}"
                 )
 
@@ -363,25 +390,43 @@ class LocalThreadedExecutor:
         # Ensure we're working with a dict
         return result
 
-    def _get_task_data(self, task: Any) -> TaskData:
+    def _get_task_data(self, task: Task) -> TaskData:
         """Extract serializable data from a task.
 
         Args:
-            task: Task object
+            task: Task object conforming to the Task protocol
 
         Returns:
             Dictionary with task metadata
+
+        Raises:
+            TypeError: If the task doesn't provide necessary attributes for metadata extraction
         """
-        if isinstance(task, SimpleFn):
-            # Special handling for SimpleFn tasks
+        # Check for SimpleFn-like interface using duck typing
+        if hasattr(task, "fn") and hasattr(task, "args") and hasattr(task, "kwargs"):
+            # Special handling for SimpleFn-like tasks
             return {
                 "fn_name": task.fn.__name__,
                 "args": task.args,
                 "kwargs": task.kwargs,
             }
-        else:
-            # Generic task data
-            return {"task_type": type(task).__name__}
+
+        # For all other task types, collect basic information we can reliably extract
+        task_info = {
+            "task_type": type(task).__name__,
+        }
+
+        # Try to extract additional useful information if available
+        if hasattr(task, "__dict__"):
+            # Filter out callables and private attributes
+            public_attrs = {
+                k: v
+                for k, v in task.__dict__.items()
+                if not k.startswith("_") and not callable(v)
+            }
+            task_info.update(public_attrs)
+
+        return task_info
 
     def _initialize_tasks(self) -> None:
         """Register all tasks with the store (idempotent).
@@ -396,7 +441,7 @@ class LocalThreadedExecutor:
         has_exists_method = hasattr(self.store, "task_exists") and callable(
             getattr(self.store, "task_exists")
         )  # Check callable
-        task_ids = [task.get_id() for task in self.tasks]
+        task_ids = [task.id for task in self.tasks]
         logger.debug(
             f"_initialize_tasks: Processing {len(task_ids)} tasks provided to executor."
         )
@@ -468,15 +513,15 @@ class LocalThreadedExecutor:
         )
 
         # Create new tasks for anything not already in the store
-        new_tasks: list[Task] = []
+        new_tasks: list[TaskDefinition] = []
         for task in self.tasks:
-            task_id = task.get_id()
+            task_id = task.id
             if task_id not in existing_ids:
                 try:
                     task_data = self._get_task_data(task)
                     # Ensure task_data is serializable before adding
                     # (SimpleFn data should be, but good practice)
-                    new_tasks.append(Task(id=task_id, data=task_data))
+                    new_tasks.append(TaskDefinition(id=task_id, data=task_data))
                 except Exception as e:
                     logger.error(
                         f"_initialize_tasks: Failed to create Task object for {task_id}: {e}",
@@ -570,7 +615,7 @@ class LocalThreadedExecutor:
         # Use task_exists method if available (custom extension)
         has_exists_method = hasattr(self.store, "task_exists")
 
-        task_ids = [task.get_id() for task in self.tasks]
+        task_ids = [task.id for task in self.tasks]
         logger.debug(
             f"_initialize_tasks: Processing {len(task_ids)} tasks provided to executor."
         )
@@ -599,12 +644,12 @@ class LocalThreadedExecutor:
                 logger.warning(f"Error checking existing tasks: {e}")
 
         # Create new tasks for anything not already in the store
-        new_tasks: list[Task] = []
+        new_tasks: list[TaskDefinition] = []
         for task in self.tasks:
-            task_id = task.get_id()
+            task_id = task.id
             if task_id not in existing_ids:
                 task_data = self._get_task_data(task)
-                new_tasks.append(Task(id=task_id, data=task_data))
+                new_tasks.append(TaskDefinition(id=task_id, data=task_data))
 
         # Batch insert all new tasks
         if new_tasks:

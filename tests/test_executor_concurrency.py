@@ -1,7 +1,7 @@
 import pytest
 import time
 from kofu import LocalThreadedExecutor
-from kofu.store import SingleSQLiteTaskStore, Task, TaskStatus
+from kofu.store import SingleSQLiteTaskStore, TaskDefinition, TaskStatus
 import sqlite3
 
 
@@ -11,7 +11,8 @@ class ExampleTaskWithDelay:
         self.url = url
         self.delay = delay
 
-    def get_id(self):
+    @property
+    def id(self):
         return self.task_id
 
     def __call__(self):
@@ -40,7 +41,9 @@ def test_tasks_execute_concurrently_with_limit(store):
         ExampleTaskWithDelay("task_2", "http://example.org", delay=2),
         ExampleTaskWithDelay("task_3", "http://example.net", delay=2),
     ]
-    store.put_many([Task(id=task.get_id(), data={"url": task.url}) for task in tasks])
+    store.put_many(
+        [TaskDefinition(id=task.id, data={"url": task.url}) for task in tasks]
+    )
 
     executor = LocalThreadedExecutor(tasks=tasks, store=store, max_concurrency=2)
 
@@ -49,7 +52,7 @@ def test_tasks_execute_concurrently_with_limit(store):
     elapsed = time.time() - start_time
 
     assert 4 <= elapsed < 5
-    assert all(get_status(store, t.get_id()) == TaskStatus.COMPLETED for t in tasks)
+    assert all(get_status(store, t.id) == TaskStatus.COMPLETED for t in tasks)
 
 
 def test_no_task_duplication(store):
@@ -60,7 +63,8 @@ def test_no_task_duplication(store):
             self.task_id = task_id
             self.url = url
 
-        def get_id(self):
+        @property
+        def id(self):
             return self.task_id
 
         def __call__(self):
@@ -72,12 +76,14 @@ def test_no_task_duplication(store):
         ExampleTaskWithCount("task_2", "http://example.org"),
         ExampleTaskWithCount("task_3", "http://example.net"),
     ]
-    store.put_many([Task(id=task.get_id(), data={"url": task.url}) for task in tasks])
+    store.put_many(
+        [TaskDefinition(id=task.id, data={"url": task.url}) for task in tasks]
+    )
 
     executor = LocalThreadedExecutor(tasks=tasks, store=store, max_concurrency=3)
     executor.run()
 
-    assert all(execution_count[t.get_id()] == 1 for t in tasks)
+    assert all(execution_count[t.id] == 1 for t in tasks)
 
 
 def test_correct_task_ordering(store):
@@ -88,7 +94,8 @@ def test_correct_task_ordering(store):
             self.task_id = task_id
             self.url = url
 
-        def get_id(self):
+        @property
+        def id(self):
             return self.task_id
 
         def __call__(self):
@@ -100,7 +107,9 @@ def test_correct_task_ordering(store):
         ExampleTaskWithOrder("task_2", "http://example.org"),
         ExampleTaskWithOrder("task_3", "http://example.net"),
     ]
-    store.put_many([Task(id=task.get_id(), data={"url": task.url}) for task in tasks])
+    store.put_many(
+        [TaskDefinition(id=task.id, data={"url": task.url}) for task in tasks]
+    )
 
     executor = LocalThreadedExecutor(tasks=tasks, store=store, max_concurrency=2)
     executor.run()

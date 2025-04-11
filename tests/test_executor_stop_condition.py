@@ -1,7 +1,7 @@
 import pytest
 import time
 from kofu import LocalThreadedExecutor
-from kofu.store import SingleSQLiteTaskStore, Task, TaskStatus
+from kofu.store import SingleSQLiteTaskStore, TaskDefinition, TaskStatus
 import sqlite3
 
 
@@ -11,7 +11,8 @@ class ExampleTaskWithDelay:
         self.url = url
         self.delay = delay
 
-    def get_id(self):
+    @property
+    def id(self):
         return self.task_id
 
     def __call__(self):
@@ -41,7 +42,7 @@ def test_stop_condition_after_task_execution(store):
         ExampleTaskWithCounter("task_2", "http://example.org", delay=0),
         ExampleTaskWithCounter("task_3", "http://example.net", delay=0),
     ]
-    store.put_many([Task(id=t.get_id(), data={"url": t.url}) for t in tasks])
+    store.put_many([TaskDefinition(id=t.id, data={"url": t.url}) for t in tasks])
 
     def stop_after_two():
         return executed_tasks >= 2
@@ -61,7 +62,7 @@ def test_stop_condition_checked_after_each_task(store):
         ExampleTaskWithDelay("task_1", "http://example.com", delay=1),
         ExampleTaskWithDelay("task_2", "http://example.org", delay=1),
     ]
-    store.put_many([Task(id=t.get_id(), data={"url": t.url}) for t in tasks])
+    store.put_many([TaskDefinition(id=t.id, data={"url": t.url}) for t in tasks])
 
     def stop_after_first_done():
         return store["task_1"].status == TaskStatus.COMPLETED
@@ -80,7 +81,7 @@ def test_stop_condition_halts_mid_execution(store):
         ExampleTaskWithDelay("task_1", "http://example.com", delay=3),
         ExampleTaskWithDelay("task_2", "http://example.org", delay=1),
     ]
-    store.put_many([Task(id=t.get_id(), data={"url": t.url}) for t in tasks])
+    store.put_many([TaskDefinition(id=t.id, data={"url": t.url}) for t in tasks])
 
     def stop_midway():
         time.sleep(2)

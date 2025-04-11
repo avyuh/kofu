@@ -16,7 +16,7 @@ import random
 from kofu.store import (
     SingleSQLiteTaskStore,
     JSONSerializer,
-    Task,
+    TaskDefinition,
     TaskState,
     TaskStatus,
 )
@@ -55,7 +55,7 @@ def serializer():
 
 
 def create_task(i):
-    return Task(id=f"task_{i}", data={"value": i, "desc": f"Task number {i}"})
+    return TaskDefinition(id=f"task_{i}", data={"value": i, "desc": f"Task number {i}"})
 
 
 def create_task_state(i, status=TaskStatus.PENDING, result=None, error=None):

@@ -1,6 +1,6 @@
 import pytest
 from kofu import LocalThreadedExecutor
-from kofu.store import SingleSQLiteTaskStore, Task, TaskStatus
+from kofu.store import SingleSQLiteTaskStore, TaskDefinition, TaskStatus
 import sqlite3
 
 
@@ -10,7 +10,8 @@ class ExampleTaskWithException:
         self.url = url
         self.should_fail = should_fail
 
-    def get_id(self):
+    @property
+    def id(self):
         return self.task_id
 
     def __call__(self):
@@ -31,7 +32,7 @@ def test_task_execution_with_exceptions(store):
         ExampleTaskWithException("task_1", "http://example.com", should_fail=True),
         ExampleTaskWithException("task_2", "http://example.org", should_fail=False),
     ]
-    store.put_many([Task(id=t.get_id(), data={"url": t.url}) for t in tasks])
+    store.put_many([TaskDefinition(id=t.id, data={"url": t.url}) for t in tasks])
 
     executor = LocalThreadedExecutor(tasks=tasks, store=store, max_concurrency=2)
     executor.run()
@@ -48,7 +49,7 @@ def test_status_summary_after_execution(store, capsys):
         ExampleTaskWithException("task_2", "http://example.org", should_fail=True),
         ExampleTaskWithException("task_3", "http://example.net", should_fail=False),
     ]
-    store.put_many([Task(id=t.get_id(), data={"url": t.url}) for t in tasks])
+    store.put_many([TaskDefinition(id=t.id, data={"url": t.url}) for t in tasks])
 
     executor = LocalThreadedExecutor(tasks=tasks, store=store, max_concurrency=2)
     executor.run()
@@ -70,7 +71,7 @@ def test_failed_tasks_are_retried(store):
             return f"Processed {self.url} on retry"
 
     tasks = [ExampleTaskWithRetry("task_1", "http://example.com", should_fail=True)]
-    store.put_many([Task(id="task_1", data={"url": "http://example.com"})])
+    store.put_many([TaskDefinition(id="task_1", data={"url": "http://example.com"})])
 
     executor = LocalThreadedExecutor(tasks=tasks, store=store, max_concurrency=1)
     executor.run()

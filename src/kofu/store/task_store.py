@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
-from .task_state import Task, TaskState, TaskStatus
+from .task_state import TaskDefinition, TaskState, TaskStatus
 
 
 class TaskStore(ABC):
@@ -36,7 +36,7 @@ class TaskStore(ABC):
         pass
 
     @abstractmethod
-    def put_many(self, tasks: List[Task]) -> None:
+    def put_many(self, tasks: List[TaskDefinition]) -> None:
         """Create multiple new tasks with PENDING status.
 
         If a task with the same ID already exists, the implementation should overwrite existing tasks with new PENDING tasks (resetting them)
@@ -181,7 +181,7 @@ class TaskStore(ABC):
         except KeyError:
             return False
 
-    def put(self, task: Task) -> None:
+    def put(self, task: TaskDefinition) -> None:
         """Create a new task with PENDING status.
 
         Args:
