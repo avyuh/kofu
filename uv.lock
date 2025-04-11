@@ -93,6 +93,7 @@ name = "kofu"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "packaging" },
     { name = "tqdm" },
 ]
 
@@ -112,6 +113,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=6.0.0" },
+    { name = "packaging", specifier = ">=24.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "tqdm" },
 ]

@@ -2,6 +2,7 @@ import pytest
 import time
 from kofu import LocalThreadedExecutor
 from kofu.store import SingleSQLiteTaskStore, Task, TaskStatus
+import sqlite3
 
 
 class ExampleTaskWithDelay:

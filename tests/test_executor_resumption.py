@@ -1,6 +1,7 @@
 import pytest
 from kofu import LocalThreadedExecutor
 from kofu.store import SingleSQLiteTaskStore, Task, TaskState, TaskStatus
+import sqlite3
 
 
 class ExampleTask:

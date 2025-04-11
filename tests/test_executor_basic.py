@@ -1,6 +1,7 @@
 import pytest
 from kofu import LocalThreadedExecutor
 from kofu.store import SingleSQLiteTaskStore, Task, TaskState, TaskStatus
+import sqlite3
 
 
 class ExampleTask:
@@ -105,3 +106,45 @@ def test_skip_completed_tasks(store):
     assert get_status(store, "task_1") == TaskStatus.COMPLETED
     assert get_status(store, "task_2") == TaskStatus.COMPLETED
     assert get_result(store, "task_2") == {"value": "Processed http://example.org"}
+
+
+def test_put_and_get_many_above_sqlite_limit(store):
+    num_tasks = 1050  # just above the 999 SQLite param limit
+    tasks = [Task(id=f"task-{i}", data={"x": i}) for i in range(num_tasks)]
+
+    # Should not raise or truncate
+    store.put_many(tasks)
+
+    # Verify all tasks are inserted
+    fetched = store.get_many([t.id for t in tasks])
+    assert len(fetched) == num_tasks
+    assert set(t.task.id for t in fetched) == set(t.id for t in tasks)
+
+
+def test_set_many_completed_chunked_above_sqlite_limit(store):
+    num_tasks = 1050
+    tasks = [Task(id=f"task-{i}", data={"x": i}) for i in range(num_tasks)]
+    store.put_many(tasks)
+
+    states = [
+        TaskState(task=t, status=TaskStatus.COMPLETED, result={"done": True})
+        for t in tasks
+    ]
+    store.set_many(states)
+
+    completed_ids = set(store.get_completed_task_ids())
+    assert len(completed_ids) == num_tasks
+    assert completed_ids == set(t.id for t in tasks)
+
+
+def test_delete_many_above_sqlite_limit(store):
+    num_tasks = 1050
+    tasks = [Task(id=f"task-{i}", data={"x": i}) for i in range(num_tasks)]
+    store.put_many(tasks)
+
+    to_delete = [t.id for t in tasks[:500]]
+    store.delete_many(to_delete)
+
+    remaining_ids = set(t.task.id for t in store)
+    assert set(to_delete).isdisjoint(remaining_ids)
+    assert len(remaining_ids) == num_tasks - 500

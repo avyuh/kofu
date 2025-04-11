@@ -12,8 +12,22 @@ from typing import Dict, Iterator, Optional, Any, Union
 from .task_store import TaskStore
 from .task_state import Task, TaskState, TaskStatus
 
+from packaging.version import Version, InvalidVersion
+
 # Configure logging
 logger = logging.getLogger(__name__)
+
+KOFU_DB_BRAND = "kofu"
+
+SUPPORTED_SCHEMA_VERSIONS = [Version("1.0")]
+CURRENT_SCHEMA_VERSION = SUPPORTED_SCHEMA_VERSIONS[-1]
+
+SQLITE_PARAM_LIMIT = 999
+
+
+class DatabaseSchemaError(sqlite3.Error):
+    """Raised when schema version is missing or incompatible."""
+
 
 # SQLite optimal configuration
 DEFAULT_PRAGMAS = {
@@ -29,6 +43,11 @@ DEFAULT_PRAGMAS = {
 
 # Schema creation with optimized ordering (BLOBs at end)
 CREATE_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS task_definitions (
     task_id TEXT PRIMARY KEY,
     task_data BLOB NOT NULL
@@ -212,8 +231,74 @@ class SingleSQLiteTaskStore(TaskStore):
 
     def _setup_database(self) -> None:
         conn = self._get_connection()
+
+        # Always attempt to create tables/indexes (idempotent)
         conn.executescript(CREATE_TABLES_SQL)
         conn.executescript(CREATE_INDEXES_SQL)
+
+        with conn:
+            # Check for 'brand' in the meta table
+            brand_row = conn.execute(
+                "SELECT value FROM meta WHERE key = 'brand'"
+            ).fetchone()
+
+            if brand_row:
+                # Brand exists — verify it's the correct one
+                if brand_row[0] != KOFU_DB_BRAND:
+                    raise DatabaseSchemaError(
+                        f"Database brand mismatch: expected '{KOFU_DB_BRAND}', found '{brand_row[0]}'"
+                    )
+            else:
+                # No brand — is this a new DB, or a corrupted/legacy one?
+                meta_keys = conn.execute("SELECT key FROM meta").fetchall()
+
+                if meta_keys:
+                    raise DatabaseSchemaError(
+                        "Refusing to initialize existing database: missing 'brand' entry in 'meta' table.\n"
+                        f"This file likely wasn't created by KOFU, or it may be corrupted, or from an older version.\n"
+                        f"To fix: delete the database at '{self.db_path}' and let KOFU recreate it, or migrate it manually if needed."
+                    )
+
+                # Brand new database — safe to initialize
+                conn.execute(
+                    "INSERT INTO meta (key, value) VALUES (?, ?)",
+                    ("brand", KOFU_DB_BRAND),
+                )
+                conn.execute(
+                    "INSERT INTO meta (key, value) VALUES (?, ?)",
+                    ("schema_version", str(CURRENT_SCHEMA_VERSION)),
+                )
+                logger.info("Initialized brand new KOFU database.")
+
+            # Validate version (fresh or existing)
+            version = self._get_schema_version(conn)
+
+            if version.major != CURRENT_SCHEMA_VERSION.major:
+                raise DatabaseSchemaError(
+                    f"Incompatible schema version {version}. "
+                    f"Expected major version {CURRENT_SCHEMA_VERSION.major}."
+                )
+            elif version not in SUPPORTED_SCHEMA_VERSIONS:
+                logger.warning(
+                    f"Schema version {version} not explicitly supported. Proceeding cautiously."
+                )
+            else:
+                logger.info(f"Schema version {version} is supported.")
+
+    def _get_schema_version(self, conn: sqlite3.Connection) -> Version:
+        try:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key = 'schema_version'"
+            ).fetchone()
+            if not row:
+                raise DatabaseSchemaError(
+                    "Missing 'schema_version' entry in meta table."
+                )
+            return Version(row[0])
+        except InvalidVersion as e:
+            raise DatabaseSchemaError(f"Invalid schema version format: {e}")
+        except Exception as e:
+            raise DatabaseSchemaError(f"Error reading schema version: {e}")
 
     @contextmanager
     def atomic(self) -> Iterator[None]:
@@ -309,52 +394,38 @@ class SingleSQLiteTaskStore(TaskStore):
         if not task_ids:
             return []
 
-        # Create a parameter placeholder string for the IN clause
-        placeholders = ",".join("?" for _ in task_ids)
-
-        # Safe query using proper parameter binding
-        query = (
-            """
-        SELECT d.task_id, d.task_data, 
-               c.result IS NOT NULL as is_completed,
-               c.result, f.error
-        FROM task_definitions d
-        LEFT JOIN completed_tasks c ON d.task_id = c.task_id
-        LEFT JOIN failed_tasks f ON d.task_id = f.task_id
-        WHERE d.task_id IN ("""
-            + placeholders
-            + ")"
-        )
-
+        results = []
         conn = self._get_connection()
 
-        # Execute with retry logic
-        cursor = self._execute_with_retry(conn.execute, query, task_ids)
-
-        results = []
-        for row in cursor:
-            task_id, task_data_blob, is_completed, result_blob, error = row
-
-            # Deserialize task data
-            task_data = self.serializer.deserialize(task_data_blob)
-            task = Task(id=task_id, data=task_data)
-
-            # Determine status and results
-            if is_completed:
-                status = TaskStatus.COMPLETED
-                result = self.serializer.deserialize(result_blob)
-                error = None
-            elif error is not None:
-                status = TaskStatus.FAILED
-                result = None
-            else:
-                status = TaskStatus.PENDING
-                result = None
-
-            results.append(
-                TaskState(task=task, status=status, result=result, error=error)
-            )
-
+        for chunk in _chunked(task_ids, SQLITE_PARAM_LIMIT):
+            placeholders = ",".join("?" for _ in chunk)
+            query = f"""
+                SELECT d.task_id, d.task_data, 
+                    c.result IS NOT NULL as is_completed,
+                    c.result, f.error
+                FROM task_definitions d
+                LEFT JOIN completed_tasks c ON d.task_id = c.task_id
+                LEFT JOIN failed_tasks f ON d.task_id = f.task_id
+                WHERE d.task_id IN ({placeholders})
+                """
+            cursor = self._execute_with_retry(conn.execute, query, chunk)
+            for row in cursor:
+                task_id, task_data_blob, is_completed, result_blob, error = row
+                task_data = self.serializer.deserialize(task_data_blob)
+                task = Task(id=task_id, data=task_data)
+                if is_completed:
+                    status = TaskStatus.COMPLETED
+                    result = self.serializer.deserialize(result_blob)
+                    error = None
+                elif error is not None:
+                    status = TaskStatus.FAILED
+                    result = None
+                else:
+                    status = TaskStatus.PENDING
+                    result = None
+                results.append(
+                    TaskState(task=task, status=status, result=result, error=error)
+                )
         return results
 
     def put_many(self, tasks: list[Task]) -> None:
@@ -366,35 +437,28 @@ class SingleSQLiteTaskStore(TaskStore):
         if not tasks:
             return
 
-        # Prepare task data with serialization
         task_data = [(task.id, self.serializer.serialize(task.data)) for task in tasks]
         task_ids = [task.id for task in tasks]
 
         with self.atomic():
             conn = self._get_connection()
-
-            # Insert task definitions
-            self._execute_with_retry(
-                conn.executemany,
-                "INSERT OR REPLACE INTO task_definitions (task_id, task_data) VALUES (?, ?)",
-                task_data,
-            )
-
-            # Delete any existing status entries to reset to PENDING
-            if task_ids:
-                # Safe deletion with proper parameters
-                placeholders = ",".join("?" for _ in task_ids)
+            for chunk in _chunked(task_data, SQLITE_PARAM_LIMIT // 2):
+                self._execute_with_retry(
+                    conn.executemany,
+                    "INSERT OR REPLACE INTO task_definitions (task_id, task_data) VALUES (?, ?)",
+                    chunk,
+                )
+            for chunk in _chunked(task_ids, SQLITE_PARAM_LIMIT):
+                placeholders = ",".join("?" for _ in chunk)
                 self._execute_with_retry(
                     conn.execute,
-                    "DELETE FROM completed_tasks WHERE task_id IN ("
-                    + placeholders
-                    + ")",
-                    task_ids,
+                    f"DELETE FROM completed_tasks WHERE task_id IN ({placeholders})",
+                    chunk,
                 )
                 self._execute_with_retry(
                     conn.execute,
-                    "DELETE FROM failed_tasks WHERE task_id IN (" + placeholders + ")",
-                    task_ids,
+                    f"DELETE FROM failed_tasks WHERE task_id IN ({placeholders})",
+                    chunk,
                 )
 
     def set_many(self, states: list[TaskState]) -> None:
@@ -406,7 +470,6 @@ class SingleSQLiteTaskStore(TaskStore):
         if not states:
             return
 
-        # Group states by status for efficient batch operations
         completed = []
         failed = []
         pending = []
@@ -420,99 +483,86 @@ class SingleSQLiteTaskStore(TaskStore):
                 )
             elif state.status == TaskStatus.FAILED:
                 failed.append((state.task.id, state.error))
-            else:  # PENDING
+            else:
                 pending.append(state.task.id)
 
         with self.atomic():
             conn = self._get_connection()
 
-            # First, check for missing task definitions
-            if all_task_ids:
-                placeholders = ",".join("?" for _ in all_task_ids)
+            # Ensure all task definitions exist
+            missing_task_ids = set()
+            for chunk in _chunked(list(all_task_ids), SQLITE_PARAM_LIMIT):
+                placeholders = ",".join("?" for _ in chunk)
                 cursor = self._execute_with_retry(
                     conn.execute,
-                    "SELECT task_id FROM task_definitions WHERE task_id IN ("
-                    + placeholders
-                    + ")",
-                    list(all_task_ids),
+                    f"SELECT task_id FROM task_definitions WHERE task_id IN ({placeholders})",
+                    chunk,
                 )
+                existing = {row[0] for row in cursor}
+                missing = set(chunk) - existing
+                missing_task_ids.update(missing)
 
-                existing_task_ids = {row[0] for row in cursor}
-                missing_task_ids = all_task_ids - existing_task_ids
-
-                # Add missing task definitions
-                if missing_task_ids:
-                    missing_tasks = []
-                    for state in states:
-                        if state.task.id in missing_task_ids:
-                            missing_tasks.append(
-                                (
-                                    state.task.id,
-                                    self.serializer.serialize(state.task.data),
-                                )
-                            )
-
+            if missing_task_ids:
+                missing_tasks = [
+                    (state.task.id, self.serializer.serialize(state.task.data))
+                    for state in states
+                    if state.task.id in missing_task_ids
+                ]
+                for chunk in _chunked(missing_tasks, SQLITE_PARAM_LIMIT // 2):
                     self._execute_with_retry(
                         conn.executemany,
                         "INSERT INTO task_definitions (task_id, task_data) VALUES (?, ?)",
-                        missing_tasks,
+                        chunk,
                     )
 
-            # Process each status group
+            # Completed tasks
             if completed:
                 completed_ids = [task_id for task_id, _ in completed]
-                placeholders = ",".join("?" for _ in completed_ids)
+                for chunk in _chunked(completed_ids, SQLITE_PARAM_LIMIT):
+                    placeholders = ",".join("?" for _ in chunk)
+                    self._execute_with_retry(
+                        conn.execute,
+                        f"DELETE FROM failed_tasks WHERE task_id IN ({placeholders})",
+                        chunk,
+                    )
+                for chunk in _chunked(completed, SQLITE_PARAM_LIMIT // 2):
+                    self._execute_with_retry(
+                        conn.executemany,
+                        "INSERT OR REPLACE INTO completed_tasks (task_id, result) VALUES (?, ?)",
+                        chunk,
+                    )
 
-                # First remove from failed table
-                self._execute_with_retry(
-                    conn.execute,
-                    "DELETE FROM failed_tasks WHERE task_id IN (" + placeholders + ")",
-                    completed_ids,
-                )
-
-                # Then add to completed table
-                self._execute_with_retry(
-                    conn.executemany,
-                    "INSERT OR REPLACE INTO completed_tasks (task_id, result) VALUES (?, ?)",
-                    completed,
-                )
-
+            # Failed tasks
             if failed:
                 failed_ids = [task_id for task_id, _ in failed]
-                placeholders = ",".join("?" for _ in failed_ids)
+                for chunk in _chunked(failed_ids, SQLITE_PARAM_LIMIT):
+                    placeholders = ",".join("?" for _ in chunk)
+                    self._execute_with_retry(
+                        conn.execute,
+                        f"DELETE FROM completed_tasks WHERE task_id IN ({placeholders})",
+                        chunk,
+                    )
+                for chunk in _chunked(failed, SQLITE_PARAM_LIMIT // 2):
+                    self._execute_with_retry(
+                        conn.executemany,
+                        "INSERT OR REPLACE INTO failed_tasks (task_id, error) VALUES (?, ?)",
+                        chunk,
+                    )
 
-                # First remove from completed table
-                self._execute_with_retry(
-                    conn.execute,
-                    "DELETE FROM completed_tasks WHERE task_id IN ("
-                    + placeholders
-                    + ")",
-                    failed_ids,
-                )
-
-                # Then add to failed table
-                self._execute_with_retry(
-                    conn.executemany,
-                    "INSERT OR REPLACE INTO failed_tasks (task_id, error) VALUES (?, ?)",
-                    failed,
-                )
-
+            # Pending tasks
             if pending:
-                placeholders = ",".join("?" for _ in pending)
-
-                # Remove from both status tables to reset to pending
-                self._execute_with_retry(
-                    conn.execute,
-                    "DELETE FROM completed_tasks WHERE task_id IN ("
-                    + placeholders
-                    + ")",
-                    pending,
-                )
-                self._execute_with_retry(
-                    conn.execute,
-                    "DELETE FROM failed_tasks WHERE task_id IN (" + placeholders + ")",
-                    pending,
-                )
+                for chunk in _chunked(pending, SQLITE_PARAM_LIMIT):
+                    placeholders = ",".join("?" for _ in chunk)
+                    self._execute_with_retry(
+                        conn.execute,
+                        f"DELETE FROM completed_tasks WHERE task_id IN ({placeholders})",
+                        chunk,
+                    )
+                    self._execute_with_retry(
+                        conn.execute,
+                        f"DELETE FROM failed_tasks WHERE task_id IN ({placeholders})",
+                        chunk,
+                    )
 
     def delete_many(self, task_ids: list[str]) -> None:
         """Delete multiple tasks by ID.
@@ -523,17 +573,15 @@ class SingleSQLiteTaskStore(TaskStore):
         if not task_ids:
             return
 
-        placeholders = ",".join("?" for _ in task_ids)
-
         with self.atomic():
             conn = self._get_connection()
-
-            # With CASCADE enabled, we only need to delete from the main table
-            self._execute_with_retry(
-                conn.execute,
-                "DELETE FROM task_definitions WHERE task_id IN (" + placeholders + ")",
-                task_ids,
-            )
+            for chunk in _chunked(task_ids, SQLITE_PARAM_LIMIT):
+                placeholders = ",".join("?" for _ in chunk)
+                self._execute_with_retry(
+                    conn.execute,
+                    f"DELETE FROM task_definitions WHERE task_id IN ({placeholders})",
+                    chunk,
+                )
 
     def __iter__(self) -> Iterator[TaskState]:
         """Iterate through all tasks.
@@ -776,3 +824,8 @@ class SingleSQLiteTaskStore(TaskStore):
         """Force a WAL checkpoint to keep database size in check."""
         conn = self._get_connection()
         self._execute_with_retry(conn.execute, "PRAGMA wal_checkpoint(FULL)")
+
+
+def _chunked(seq, n):
+    for i in range(0, len(seq), n):
+        yield seq[i : i + n]
