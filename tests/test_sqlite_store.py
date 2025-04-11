@@ -7,6 +7,8 @@ import time
 import os
 import random
 import logging
+from unittest.mock import patch, MagicMock, call
+import random
 
 # No longer need unittest.mock here
 # from unittest.mock import patch, MagicMock
@@ -25,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 # --- Fixtures ---
+
+
+@pytest.fixture
+def store_path(tmp_path):
+    """Provides a temporary path for the store."""
+    return str(tmp_path)
 
 
 @pytest.fixture
@@ -738,3 +746,74 @@ def test_reset_failed(store):
     assert states["task_3"].error is None
     assert states["task_1"].status == TaskStatus.COMPLETED  # Unchanged
     assert states["task_2"].status == TaskStatus.PENDING  # Unchanged
+
+
+@patch("random.random", return_value=0.05)  # Fixed 5% jitter for test predictability
+def test_retry_backoff_capped(mock_random, store_path):
+    """Verify that sleep time during retries is capped."""
+    max_retries = 5
+    cap_seconds = 0.5  # Set a specific cap for the test
+    initial_delay = 0.01
+
+    # Initialize store with the cap
+    store = SingleSQLiteTaskStore(
+        directory=store_path, max_retries=max_retries, max_retry_delay_sec=cap_seconds
+    )
+
+    # Mock the connection's execute method to always raise the lock error
+    mock_execute = MagicMock(side_effect=sqlite3.OperationalError("database is locked"))
+    mock_conn = MagicMock()
+    mock_conn.execute = mock_execute
+
+    # Use patch context managers for mocks
+    with (
+        patch.object(store, "_get_connection", return_value=mock_conn),
+        patch("time.sleep") as mock_sleep,
+    ):
+
+        # Call a method that triggers _execute_with_retry (e.g., __len__)
+        # Expect it to fail after exhausting retries
+        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+            len(store)  # Trigger the retry logic
+
+        # Verify execute was called max_retries + 1 times (initial + retries)
+        assert mock_execute.call_count == max_retries + 1
+
+        # Verify time.sleep was called max_retries times
+        assert mock_sleep.call_count == max_retries
+
+        # Check the sleep durations passed to time.sleep
+        sleep_calls = mock_sleep.call_args_list
+        expected_sleep_times = []
+        current_delay = initial_delay
+
+        # --- START FIX ---
+        # Correctly calculate the jitter factor based on the implementation logic
+        mock_random_return = mock_random.return_value  # e.g., 0.05
+        jitter_scaling_factor = 0.1  # From implementation: random.random() * 0.1
+        jitter_value = (
+            mock_random_return * jitter_scaling_factor
+        )  # e.g., 0.05 * 0.1 = 0.005
+        jitter_factor = 1 + jitter_value  # e.g., 1 + 0.005 = 1.005
+        # --- END FIX ---
+
+        for i in range(max_retries):
+            # Use the correctly calculated jitter_factor
+            base_sleep = current_delay * jitter_factor
+            expected_capped_sleep = min(base_sleep, cap_seconds)
+            expected_sleep_times.append(pytest.approx(expected_capped_sleep, abs=1e-3))
+            current_delay *= 2  # Calculate next base delay
+
+        actual_sleep_times = [c.args[0] for c in sleep_calls]
+
+        # Assert that the actual sleep times match the expected capped times
+        # This assertion should now pass
+        assert (
+            actual_sleep_times == expected_sleep_times
+        ), f"Actual: {actual_sleep_times}, Expected: {[t.expected for t in expected_sleep_times]}"
+
+        # Explicitly check that no sleep time exceeded the cap
+        for sleep_time in actual_sleep_times:
+            assert sleep_time <= cap_seconds
+
+    store.close()

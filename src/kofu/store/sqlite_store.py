@@ -126,6 +126,7 @@ class SingleSQLiteTaskStore(TaskStore):
         timeout: float = 60,
         pragmas: Optional[Dict[str, Union[str, int]]] = None,
         max_retries: int = 3,
+        max_retry_delay_sec: float = 3.0,
     ):
         """Initialize SQLite task store.
 
@@ -135,6 +136,7 @@ class SingleSQLiteTaskStore(TaskStore):
             timeout: SQLite connection timeout in seconds
             pragmas: Dict of SQLite PRAGMA settings to override defaults
             max_retries: Maximum retries for locked database operations
+            max_retry_delay_sec: Maximum sleep time (in seconds) between retries to prevent very long waits.
         """
         self.directory = os.path.abspath(directory)
         os.makedirs(self.directory, exist_ok=True)
@@ -145,6 +147,7 @@ class SingleSQLiteTaskStore(TaskStore):
         self._pragmas = {**DEFAULT_PRAGMAS, **(pragmas or {})}
         self._local = threading.local()
         self._max_retries = max_retries
+        self._max_retry_delay_sec = max_retry_delay_sec
 
         # Initialize database
         self._setup_database()
@@ -194,6 +197,8 @@ class SingleSQLiteTaskStore(TaskStore):
     def _execute_with_retry(self, func, *args, **kwargs):
         """Execute a function with retry logic for database locks.
 
+        Applies exponential backoff with jitter, capped by max_retry_delay_sec.
+
         Args:
             func: Function to execute
             *args, **kwargs: Arguments for the function
@@ -202,7 +207,7 @@ class SingleSQLiteTaskStore(TaskStore):
             Result of the function
 
         Raises:
-            sqlite3.Error: If retries are exhausted
+            sqlite3.Error: If retries are exhausted or a non-lock error occurs.
         """
         retry_count = 0
         retry_delay = 0.01  # Initial delay in seconds
@@ -212,22 +217,38 @@ class SingleSQLiteTaskStore(TaskStore):
                 return func(*args, **kwargs)
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e) and retry_count < self._max_retries:
-                    # Log retry attempt
+                    retry_count += 1
+
+                    # Calculate exponential backoff with jitter
+                    jitter = random.random() * 0.1  # 0-10% jitter
+                    base_sleep_time = retry_delay * (1 + jitter)
+
+                    # Apply the maximum sleep time cap
+                    sleep_time = min(base_sleep_time, self._max_retry_delay_sec)
+
+                    # Log retry attempt with actual sleep time
                     logger.debug(
-                        f"Database locked, retrying ({retry_count+1}/{self._max_retries})"
+                        f"Database locked, retrying ({retry_count}/{self._max_retries}) "
+                        f"after sleeping for {sleep_time:.3f}s (base delay: {retry_delay:.3f}s)"
                     )
 
-                    # Exponential backoff with jitter
-                    jitter = random.random() * 0.1  # 0-10% jitter
-                    sleep_time = retry_delay * (1 + jitter)
                     time.sleep(sleep_time)
 
                     retry_delay *= 2  # Exponential backoff
-                    retry_count += 1
                 else:
-                    # Log the error before re-raising
-                    logger.error(f"SQLite error: {e}")
-                    raise
+                    # Log the final error before re-raising
+                    if "database is locked" in str(e):
+                        logger.error(
+                            f"SQLite 'database is locked' error persisted after "
+                            f"{self._max_retries} retries. Giving up."
+                        )
+                    else:
+                        logger.error(f"SQLite operational error: {e}")
+                    raise  # Re-raise the original or a new informative error
+            except sqlite3.Error as e:
+                # Catch other SQLite errors separately if needed, or just log and re-raise
+                logger.error(f"Unhandled SQLite error during execution: {e}")
+                raise
 
     def _setup_database(self) -> None:
         conn = self._get_connection()
