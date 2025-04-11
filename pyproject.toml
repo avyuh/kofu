@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kofu"
-version = "0.2.2"
+version = "1.0.0"
 description = "An execution framework for i/o heavy task with memory persistence and concurrency"
 readme = "README.md"
 authors = [
     {name = "avyuh", email = "contact@jhaabhi.com"}
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 classifiers = [
     "Programming Language :: Python :: 3",
