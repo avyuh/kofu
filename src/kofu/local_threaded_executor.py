@@ -52,6 +52,10 @@ class LocalThreadedExecutor:
         Raises:
             ValueError: If neither store nor path is provided
         """
+        logger.debug(
+            "LocalThreadedExecutor.__init__: Starting initialization."
+        )  # Added log
+
         self.tasks = tasks
         self.path = path
         self.max_concurrency = max_concurrency
@@ -61,14 +65,24 @@ class LocalThreadedExecutor:
         self.batch_size = batch_size
 
         # Task lookup for efficient access
+        logger.debug("LocalThreadedExecutor.__init__: Creating task map.")  # Added log
         self._task_map = {task.get_id(): task for task in tasks}
+        logger.debug(
+            f"LocalThreadedExecutor.__init__: Task map created with {len(self._task_map)} entries."
+        )  # Added log
 
         # Initialize store
         if store is None:
             if path is None:
                 raise ValueError("Either a store instance or a path must be provided")
+                logger.debug(
+                    f"LocalThreadedExecutor.__init__: Creating new SingleSQLiteTaskStore at path: {path}"
+                )  # Added log
             self.store = SingleSQLiteTaskStore(directory=path)
         else:
+            logger.debug(
+                "LocalThreadedExecutor.__init__: Using provided store instance."
+            )  # Added log
             self.store = store
 
     def status_summary(self) -> Dict[TaskStatus, int]:
@@ -97,7 +111,11 @@ class LocalThreadedExecutor:
         Robust error handling ensures no task results are lost.
         """
         # Register all tasks (idempotent)
+        logger.debug(
+            "LocalThreadedExecutor.run: Calling _initialize_tasks."
+        )  # Added log
         self._initialize_tasks()
+        logger.debug("LocalThreadedExecutor.run: Finished initialization.")  # Added log
 
         # Get pending task IDs efficiently
         pending_task_ids = self.store.get_pending_task_ids()
@@ -370,6 +388,182 @@ class LocalThreadedExecutor:
 
         Uses batch operations for efficiency and resilient error handling.
         """
+        logger.debug("--- Entering _initialize_tasks ---")  # Changed log alias
+
+        # Gather existing tasks using efficient batch operations
+        existing_ids: Set[str] = set()
+
+        has_exists_method = hasattr(self.store, "task_exists") and callable(
+            getattr(self.store, "task_exists")
+        )  # Check callable
+        task_ids = [task.get_id() for task in self.tasks]
+        logger.debug(
+            f"_initialize_tasks: Processing {len(task_ids)} tasks provided to executor."
+        )
+
+        # Define check_batch_size here
+        check_batch_size = 500
+
+        if has_exists_method:
+            logger.debug(
+                "_initialize_tasks: Using task_exists method for existence check."
+            )
+            checked_count = 0
+            try:
+                for i in range(0, len(task_ids), check_batch_size):
+                    batch_ids_to_check = task_ids[i : i + check_batch_size]
+                    count_in_batch = 0
+                    for task_id in batch_ids_to_check:
+                        if cast(Any, self.store).task_exists(
+                            task_id
+                        ):  # Pass task_id directly
+                            existing_ids.add(task_id)
+                            count_in_batch += 1
+                        checked_count += 1
+                    logger.debug(
+                        f"_initialize_tasks: Checked task_exists for batch {i // check_batch_size}, found {count_in_batch} existing in batch."
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"_initialize_tasks: Error during task_exists check: {e}",
+                    exc_info=True,
+                )
+            logger.debug(
+                f"_initialize_tasks: Finished task_exists checks. Total checked: {checked_count}. Found {len(existing_ids)} existing."
+            )
+
+        else:
+            # Efficient batch check with get_many
+            logger.debug(
+                "_initialize_tasks: Using get_many method for existence check."
+            )
+            try:
+                for i in range(0, len(task_ids), check_batch_size):
+                    batch_ids = task_ids[i : i + check_batch_size]
+                    logger.debug(
+                        f"_initialize_tasks: Calling get_many for {len(batch_ids)} IDs (batch {i // check_batch_size})."
+                    )
+                    # Ensure store is callable if using get_many
+                    if callable(getattr(self.store, "get_many", None)):
+                        states = self.store.get_many(batch_ids)
+                        batch_existing_ids = {state.task.id for state in states}
+                        existing_ids.update(batch_existing_ids)
+                        logger.debug(
+                            f"_initialize_tasks: get_many returned {len(states)} states for batch {i // check_batch_size}. Total existing now: {len(existing_ids)}"
+                        )
+                    else:
+                        logger.warning(
+                            "_initialize_tasks: store.get_many is not callable, skipping existence check."
+                        )
+                        break  # Cannot check existence this way
+
+            except Exception as e:
+                logger.warning(
+                    f"_initialize_tasks: Error during bulk get_many for existence check: {e}",
+                    exc_info=True,
+                )
+
+        logger.debug(
+            f"_initialize_tasks: Total existing tasks identified via checks: {len(existing_ids)}"
+        )
+
+        # Create new tasks for anything not already in the store
+        new_tasks: list[Task] = []
+        for task in self.tasks:
+            task_id = task.get_id()
+            if task_id not in existing_ids:
+                try:
+                    task_data = self._get_task_data(task)
+                    # Ensure task_data is serializable before adding
+                    # (SimpleFn data should be, but good practice)
+                    new_tasks.append(Task(id=task_id, data=task_data))
+                except Exception as e:
+                    logger.error(
+                        f"_initialize_tasks: Failed to create Task object for {task_id}: {e}",
+                        exc_info=True,
+                    )
+
+        logger.debug(
+            f"_initialize_tasks: Identified {len(new_tasks)} tasks to add/update in the store."
+        )
+
+        # Batch insert/update all new tasks
+        if new_tasks:
+            logger.info(
+                f"_initialize_tasks: Registering/Updating {len(new_tasks)} tasks in store..."
+            )
+
+            # Process in batches
+            # Use a batch size appropriate for put_many (might differ from check batch size)
+            put_batch_size = min(
+                500, self.batch_size * 5
+            )  # Larger batches for initialization is often good
+            logger.debug(
+                f"_initialize_tasks: Using batch size {put_batch_size} for put_many."
+            )
+
+            for i in range(0, len(new_tasks), put_batch_size):
+                batch = new_tasks[i : i + put_batch_size]
+                logger.debug(
+                    f"_initialize_tasks: Calling put_many for batch {i // put_batch_size + 1}/{ (len(new_tasks) + put_batch_size - 1) // put_batch_size } ({len(batch)} tasks)."
+                )
+                try:
+                    # Make sure put_many call is actually happening
+                    # logger.debug(f"put_many task IDs (sample): {[t.id for t in batch[:5]]}") # Can be verbose
+                    self.store.put_many(batch)
+                    logger.debug(
+                        f"_initialize_tasks: put_many for batch {i // put_batch_size + 1} succeeded."
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"_initialize_tasks: Error registering batch {i // put_batch_size + 1} of tasks: {e}. Falling back to individual puts if possible.",
+                        exc_info=True,  # Add traceback
+                    )
+                    # Fallback logic (optional, depends on desired robustness)
+                    logger.info(
+                        f"Attempting individual puts for failed batch {i // put_batch_size + 1}..."
+                    )
+                    success_count = 0
+                    fail_count = 0
+                    for task_to_put in batch:
+                        try:
+                            self.store.put_many(
+                                [task_to_put]
+                            )  # put_many expects a list
+                            success_count += 1
+                        except Exception as e2:
+                            logger.error(
+                                f"_initialize_tasks: Failed individual put for task {task_to_put.id}: {e2}"
+                            )
+                            fail_count += 1
+                    logger.info(
+                        f"Individual puts result for batch {i // put_batch_size + 1}: {success_count} succeeded, {fail_count} failed."
+                    )
+
+            logger.info(f"_initialize_tasks: Finished registering/updating tasks.")
+        else:
+            logger.info(
+                "_initialize_tasks: No new tasks identified to register/update."
+            )
+
+        # Final check of store length
+        try:
+            current_len = len(self.store)
+            logger.debug(
+                f"_initialize_tasks: Store length after initialization attempt: {current_len}"
+            )
+        except Exception as e:
+            logger.error(
+                f"_initialize_tasks: Failed to get store length after init: {e}"
+            )
+
+        logger.debug("--- Exiting _initialize_tasks ---")
+        """Register all tasks with the store (idempotent).
+
+        Uses batch operations for efficiency and resilient error handling.
+        """
+        logger.debug("--- Entering _initialize_tasks ---")  # Changed log alias
+
         # Gather existing tasks using efficient batch operations
         existing_ids: Set[str] = set()
 
@@ -377,8 +571,16 @@ class LocalThreadedExecutor:
         has_exists_method = hasattr(self.store, "task_exists")
 
         task_ids = [task.get_id() for task in self.tasks]
+        logger.debug(
+            f"_initialize_tasks: Processing {len(task_ids)} tasks provided to executor."
+        )
 
+        check_batch_size = 500
         if has_exists_method:
+            logger.debug(
+                "_initialize_tasks: Using task_exists method for existence check."
+            )
+            checked_count = 0
             for task_id in task_ids:
                 try:
                     if cast(Any, self.store).task_exists(task_id):
