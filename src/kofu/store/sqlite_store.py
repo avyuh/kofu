@@ -17,7 +17,7 @@ from packaging.version import Version, InvalidVersion
 # Configure logging
 logger = logging.getLogger(__name__)
 
-KOFU_DB_BRAND = "kofu"
+KOFU_DB_BRAND = "kofu-a9e82f39-4262-425c-aee1-6a0432601c9f"
 
 SUPPORTED_SCHEMA_VERSIONS = [Version("1.0")]
 CURRENT_SCHEMA_VERSION = SUPPORTED_SCHEMA_VERSIONS[-1]
