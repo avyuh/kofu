@@ -21,7 +21,6 @@ from .store import (
     TaskStatus,
     SingleSQLiteTaskStore,
 )
-from .tasks import SimpleFn
 from .tasks import Task
 
 # Configure logging
@@ -585,7 +584,7 @@ class LocalThreadedExecutor:
                         f"Individual puts result for batch {i // put_batch_size + 1}: {success_count} succeeded, {fail_count} failed."
                     )
 
-            logger.info(f"_initialize_tasks: Finished registering/updating tasks.")
+            logger.info("_initialize_tasks: Finished registering/updating tasks.")
         else:
             logger.info(
                 "_initialize_tasks: No new tasks identified to register/update."

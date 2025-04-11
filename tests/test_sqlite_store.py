@@ -4,11 +4,9 @@ import pytest
 import sqlite3
 import threading
 import time
-import os
 import random
 import logging
-from unittest.mock import patch, MagicMock, call
-import random
+from unittest.mock import patch, MagicMock
 
 # No longer need unittest.mock here
 # from unittest.mock import patch, MagicMock

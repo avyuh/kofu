@@ -7,13 +7,10 @@ import os
 import logging
 import random
 import gc
-from collections import defaultdict
 
 from kofu import LocalThreadedExecutor
 from kofu.store import (
     SingleSQLiteTaskStore,
-    TaskDefinition,
-    TaskState,
     TaskStatus,
     get_status_summary,
 )
