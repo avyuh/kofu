@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kofu"
-version = "1.0.0"
+version = "0.3.0"
 description = "An execution framework for i/o heavy task with memory persistence and concurrency"
 readme = "README.md"
 authors = [
